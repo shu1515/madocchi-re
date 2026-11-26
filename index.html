@@ -97,6 +97,7 @@
       .seg button + button { border-left: 1px solid var(--line); }
       .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
       .tlabel { color: var(--muted); font-size: 12px; white-space: nowrap; }
+      .version { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
       .fav-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
       .chip {
         display: inline-flex; align-items: stretch;
@@ -259,6 +260,7 @@
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 11h11M4 16h14"/></svg>
           弾幕
         </button>
+        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v8</span>
         <span class="spacer"></span>
         <label class="tlabel" for="sinkSel">音声出力先（スペース全体）</label>
         <select id="sinkSel"><option value="">既定のデバイス</option></select>
