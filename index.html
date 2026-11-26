@@ -269,7 +269,7 @@
       </div>
       <div class="trow">
         <span id="sinkStatus" role="status" aria-live="polite">出力先を確認中…</span>
-        <span class="note">Chrome / Edge では、ここで選んだデバイスからスペース全体（全窓の Twitch 埋め込み含む）の音が出ます。他のブラウザではこの切り替え自体が使えません。その場合は OS の「アプリごとの出力先」で、このスペースを開いているブラウザごと別デバイスに割り当ててください。</span>
+        <span class="note">Chrome / Edge では、ここで選んだデバイスからスペース全体（全窓の Twitch 埋め込み含む）の音が出ます。出力先を変えると、開いている窓のプレイヤーは自動で読み直されます（Twitch 埋め込みは読み込まれた時点の出力先で音を出し続けるため、読み直さないと前のデバイスから鳴り続けます）。読み直した窓はミュートで始まるので、プレイヤー側でミュートを解除してください。他のブラウザではこの切り替え自体が使えません。その場合は OS の「アプリごとの出力先」で、このスペースを開いているブラウザごと別デバイスに割り当ててください。</span>
       </div>
       <div class="trow">
         <span class="tlabel">お気に入り</span>
@@ -853,7 +853,12 @@
            （＝このスペース）全体の既定の出力先を切り替える。個別に sinkId を
            指定していない音はすべて従うため、全窓の Twitch 埋め込みプレイヤー
            の音も一緒に切り替わる。対応は Chrome / Edge のみ。それ以外では
-           OS 側でブラウザごとに出力先を割り当てるしかない（案内を表示する）。 */
+           OS 側でブラウザごとに出力先を割り当てるしかない（案内を表示する）。
+           注意：Twitch 埋め込みプレイヤーは読み込まれた時点の既定出力先で
+           音声出力を開始するため、setDefaultSinkId を呼んだだけでは再生中の
+           プレイヤーが前のデバイスから鳴り続けることがある。そのため出力先の
+           切り替えに成功したら、開いている全窓のプレイヤーを自動で読み直し、
+           新しい出力先で音声を開始させる（applySink(true)）。 */
         var sinkSel = document.getElementById("sinkSel");
         var testAudio = document.getElementById("testAudio");
         var sinkStatus = document.getElementById("sinkStatus");
@@ -877,7 +882,33 @@
           if (err.name === "AbortError") return "選択がキャンセルされました。";
           return err.message || err.name || "";
         }
-        function applySink() {
+        /* 開いている全窓のプレイヤー iframe を作り直し、現在の既定出力先で
+           音声を開始させる。作り直した窓の数を返す。 */
+        function reloadPlayers() {
+          var n = 0;
+          wins.forEach(function (w) {
+            if (!w.channel || w.i >= state.count) return;
+            var old = w.refs.playerWrap.querySelector("iframe.player");
+            if (!old) return;
+            old.remove();
+            w.rendered = false;
+            renderWindow(w);
+            n++;
+          });
+          return n;
+        }
+        /* ブラウザが iframe 要素自体の setSinkId に対応している場合は、
+           埋め込みプレイヤーの音声にも直接 sinkId を適用する
+           （未対応のブラウザでは何もしない）。 */
+        function applySinkToFrames() {
+          wins.forEach(function (w) {
+            var f = w.refs.playerWrap.querySelector("iframe.player");
+            if (f && typeof f.setSinkId === "function") {
+              f.setSinkId(state.sinkId).catch(function () {});
+            }
+          });
+        }
+        function applySink(reloadAfter) {
           var md = navigator.mediaDevices;
           var jobs = [];
           var failures = [];
@@ -903,16 +934,27 @@
               }
               return;
             }
+            /* 切り替え成功：埋め込み側にも直接適用を試み、再生中のプレイヤーは
+               新しい出力先で開始し直すために読み直す。 */
+            applySinkToFrames();
+            var reloaded = 0;
+            if (pageSinkSupported && reloadAfter) {
+              reloaded = reloadPlayers();
+              if (reloaded) applySinkToFrames();
+            }
+            var reloadNote = reloaded
+              ? "開いている窓のプレイヤーを読み直したので、音は新しい出力先から出ます（読み直した窓はミュートで始まるので、プレイヤーでミュートを解除してください）。"
+              : "";
             if (!state.sinkId) {
               if (pageSinkSupported) {
-                setSinkStatus("既定のデバイスで再生中です。切り替えた窓の音が戻らないときは「窓を再読込」を押してください。", "ok");
+                setSinkStatus("既定のデバイスで再生中です。" + reloadNote, "ok");
               } else {
                 setSinkStatus("既定のデバイスで再生中です（このブラウザでは配信の音は切り替わりません）。", "warn");
               }
               return;
             }
             if (pageSinkSupported) {
-              setSinkStatus("適用中：「" + selectedSinkLabel() + "」— スペース全体（全窓の配信含む）の音がこのデバイスから出ます。", "ok");
+              setSinkStatus("適用中：「" + selectedSinkLabel() + "」— " + (reloadNote || "スペース全体（全窓の配信含む）の音がこのデバイスから出ます。"), "ok");
             } else {
               setSinkStatus("テスト音だけ「" + selectedSinkLabel() + "」に切り替えました。配信の音の切り替えは Chrome / Edge が必要です。", "warn");
             }
@@ -957,7 +999,7 @@
         }
         sinkSel.addEventListener("change", function () {
           state.sinkId = sinkSel.value;
-          applySink();
+          applySink(true);
         });
         document.getElementById("sinkRefresh").addEventListener("click", function () { refreshDevices(true); });
         document.getElementById("sinkPick").addEventListener("click", function () {
@@ -968,7 +1010,7 @@
                 setSinkStatus("既定のデバイスが選ばれました。", "");
                 state.sinkId = "";
                 sinkSel.value = "";
-                applySink();
+                applySink(true);
                 return;
               }
               var found = false;
@@ -983,7 +1025,7 @@
               }
               state.sinkId = d.deviceId;
               sinkSel.value = d.deviceId;
-              applySink();
+              applySink(true);
             }).catch(function (e) {
               if (e && e.name === "AbortError") return;
               setSinkStatus("デバイスを選べませんでした：" + sinkErrorText(e), "bad");
@@ -994,18 +1036,13 @@
           }
         });
         document.getElementById("sinkReload").addEventListener("click", function () {
-          wins.forEach(function (w) {
-            if (!w.channel || w.i >= state.count) return;
-            var old = w.refs.playerWrap.querySelector("iframe.player");
-            if (old) old.remove();
-            w.rendered = false;
-            renderWindow(w);
-          });
-          setSinkStatus("全窓のプレイヤーを読み直しました。音は現在の出力先（" + selectedSinkLabel() + "）で再生されます。", pageSinkSupported ? "ok" : "");
+          var n = reloadPlayers();
+          if (n) applySinkToFrames();
+          setSinkStatus("全窓のプレイヤーを読み直しました。音は現在の出力先（" + selectedSinkLabel() + "）で再生されます（読み直した窓はミュートで始まるので解除してください）。", pageSinkSupported ? "ok" : "");
         });
         document.getElementById("sinkTest").addEventListener("click", function () {
           if (!testAudio.src) testAudio.src = makeBeepURL();
-          applySink().then(function () {
+          applySink(false).then(function () {
             testAudio.currentTime = 0;
             testAudio.play().catch(function () {});
           });
