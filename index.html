@@ -324,7 +324,7 @@
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 11h11M4 16h14"/></svg>
           弾幕
         </button>
-        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v11</span>
+        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v12</span>
         <span class="spacer"></span>
         <label class="tlabel" for="sinkSel">音声出力先</label>
         <select id="sinkSel"><option value="">既定のデバイス</option></select>
@@ -354,6 +354,8 @@
             <li>「パッケージ化されていない拡張機能を読み込む」を押し、展開したフォルダを選ぶ。</li>
             <li>このページを再読み込みし、「連携を確認」で接続できたら、「拡張でこのタブの音を切り替える」を押す。出力先は上の「音声出力先」で選んだデバイスが使われ、再生中に変えると拡張側へも適用される。</li>
             <li>止めるときは「拡張の音声を停止」。元のタブのミュートも解除される。</li>
+            <li>以前の版（v1.0.0）を入れている場合は、上のZIPを取り直し、chrome://extensions で古い拡張機能を一度削除してから新しいフォルダを読み込み直してください（ファイルの差し替えだけでは更新されません）。v1.1.0 では、開始時に「Extension has not been invoked…」と出る権限エラーを直しています。</li>
+            <li>それでも同じエラーが出る場合は、ツールバーの拡張機能アイコンをクリックしてポップアップを開き、そこの「開始」を押してください（ポップアップを開く操作が、そのタブでの拡張機能の呼び出しになります）。chrome:// などのブラウザ内蔵ページはキャプチャできないので、ビューアのタブで実行してください。</li>
           </ol>
           <div class="ext-files">
             <button type="button" id="extZip">拡張機能一式（ZIP）をダウンロード</button>
@@ -1285,22 +1287,32 @@
            捕まえられるのはタブ全体の混ざった音だけなので、窓ごとの振り分けは
            できない。ビューアを複数タブ開けばタブごとの振り分けは可能。
            拡張本体のファイルはこのページに同梱し、ダウンロードして
-           chrome://extensions のデベロッパーモードで読み込む形にする。 */
+           chrome://extensions のデベロッパーモードで読み込む形にする。
+           拡張 v1.1.0 での修正：tabCapture は「拡張がそのページで呼び出されて
+           いる」か「対象サイトへのホスト権限がある」場合にだけ許可され、
+           どちらも無いと "Extension has not been invoked for the current page
+           (see activeTab permission)" で開始に失敗する。そのため manifest に
+           host_permissions（全サイト）と activeTab を追加した。あわせて、
+           合図の中継はトップフレームだけに限定した（iframe 側からも中継すると
+           開始リクエストが二重に飛んで競合する）。それでも呼び出しエラーが
+           出る環境では、拡張アイコンのポップアップから開始する（ポップアップを
+           開く操作自体が、そのタブでの拡張の呼び出しとして扱われる）。 */
         var EXT_FILES = {};
         EXT_FILES["manifest.json"] = [
           '{',
           '  "manifest_version": 3,',
           '  "name": "まどっち音声ブリッジ",',
-          '  "version": "1.0.0",',
+          '  "version": "1.1.0",',
           '  "description": "まどっち風マルチビューアのタブ音声を、選んだ出力デバイスで再生し直す拡張機能",',
-          '  "permissions": ["tabCapture", "offscreen", "tabs"],',
+          '  "permissions": ["tabCapture", "offscreen", "tabs", "activeTab"],',
+          '  "host_permissions": ["*://*/*"],',
           '  "background": { "service_worker": "background.js" },',
           '  "content_scripts": [',
           '    {',
           '      "matches": ["*://*/*"],',
           '      "js": ["content.js"],',
           '      "run_at": "document_start",',
-          '      "all_frames": true',
+          '      "all_frames": false',
           '    }',
           '  ],',
           '  "action": { "default_popup": "popup.html", "default_title": "まどっち音声ブリッジ" }',
@@ -1310,10 +1322,13 @@
           '"use strict";',
           '/* ページと拡張の橋渡し。ページからの合図（source が madocchi-page の',
           '   postMessage）だけを service worker へ中継し、結果をページへ返す。',
-          '   合図の名前空間が一致しないページでは何もしない。 */',
-          'document.documentElement.setAttribute("data-madocchi-ext", "1.0.0");',
+          '   合図の名前空間が一致しないページでは何もしない。',
+          '   橋渡しはトップフレームだけで行う：iframe（Twitch埋め込み等）側でも',
+          '   中継すると開始リクエストが二重に飛び、キャプチャが競合するため。 */',
+          'if (window.top === window) {',
+          'document.documentElement.setAttribute("data-madocchi-ext", "1.1.0");',
           'function announce() {',
-          '  window.postMessage({ source: "madocchi-ext", type: "MADOCCHI_EXT_READY", version: "1.0.0" }, "*");',
+          '  window.postMessage({ source: "madocchi-ext", type: "MADOCCHI_EXT_READY", version: "1.1.0" }, "*");',
           '}',
           'announce();',
           'window.addEventListener("DOMContentLoaded", announce);',
@@ -1337,7 +1352,8 @@
           '  if (msg && msg.type === "BRIDGE_STATE") {',
           '    window.postMessage({ source: "madocchi-ext", type: "MADOCCHI_EXT_STATE", state: msg.state }, "*");',
           '  }',
-          '});'
+          '});',
+          '}'
         ].join("\n");
         EXT_FILES["background.js"] = [
           '"use strict";',
@@ -1395,10 +1411,13 @@
           '  (async function () {',
           '    try {',
           '      if (msg.type === "MADOCCHI_PING") {',
-          '        sendResponse({ ok: true, version: "1.0.0", capturing: captureTabId != null, deviceId: currentDeviceId, status: lastStatus });',
+          '        sendResponse({ ok: true, version: "1.1.0", capturing: captureTabId != null, deviceId: currentDeviceId, status: lastStatus });',
           '      } else if (msg.type === "MADOCCHI_START") {',
           '        var tabId = await resolveTabId(sender);',
           '        if (tabId == null) { sendResponse({ ok: false, error: "対象タブが見つかりません" }); return; }',
+          '        var tabInfo = null;',
+          '        try { tabInfo = await chrome.tabs.get(tabId); } catch (e) {}',
+          '        if (!tabInfo || !/^https?:\\/\\//.test(tabInfo.url || "")) { sendResponse({ ok: false, error: "このページはキャプチャできません（chrome:// などのブラウザ内蔵ページが対象になっています）。ビューアを開いているタブを前面にして実行してください。" }); return; }',
           '        var r = await startCapture(tabId, msg.deviceId);',
           '        sendResponse(r || { ok: true });',
           '        if (r && r.ok) notifyTab(tabId, { capturing: true, deviceId: currentDeviceId });',
@@ -1422,7 +1441,13 @@
           '        sendResponse({ ok: false, error: "unknown type" });',
           '      }',
           '    } catch (e) {',
-          '      sendResponse({ ok: false, error: String((e && e.message) || e) });',
+          '      var em = String((e && e.message) || e);',
+          '      if (em.indexOf("has not been invoked") !== -1 || em.indexOf("activeTab") !== -1) {',
+          '        em = "拡張機能がこのページで呼び出されていません。ツールバーの拡張機能アイコンをクリックしてポップアップを開き、そこの「開始」を押してください（ポップアップを開く操作が、そのタブでの拡張機能の呼び出しになります）。拡張機能を入れ直した場合は chrome://extensions で再読み込みもしてください。元のエラー: " + em;',
+          '      } else if (em.indexOf("cannot be captured") !== -1 || em.indexOf("Chrome pages") !== -1) {',
+          '        em = "このページはキャプチャできません（ブラウザ内蔵ページが対象になっています）。ビューアを開いているタブを前面にして実行してください。元のエラー: " + em;',
+          '      }',
+          '      sendResponse({ ok: false, error: em });',
           '    }',
           '  })();',
           '  return true;',
@@ -1579,6 +1604,12 @@
           '- できる：タブ単位での出力先の切り替え（ビューアを複数タブ開けばタブごとに振り分け可能）',
           '- できない：1つのタブの中の窓ごとの振り分け（タブの音は混ざって届くため）',
           '- 捕まえて再生し直す分だけ、わずかな遅延がある',
+          '',
+          '## うまくいかないとき',
+          '',
+          '- 「Extension has not been invoked for the current page」と出たら、このフォルダが v1.1.0 以降か確認し、chrome://extensions で拡張機能を削除して読み込み直す。それでも出る場合は、ツールバーの拡張機能アイコンをクリックしてポップアップを開き、そこの「開始」を押す（ポップアップを開く操作が、そのタブでの拡張機能の呼び出しになる）',
+          '- chrome:// などのブラウザ内蔵ページはキャプチャできない。ビューアを開いているタブで実行すること',
+          '- 拡張機能のファイルを差し替えたら、chrome://extensions で再読み込み（または削除して読み込み直し）をすること。差し替えだけでは古い版が動き続ける',
           '',
           '## プライバシー',
           '',
