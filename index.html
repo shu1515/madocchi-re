@@ -260,9 +260,9 @@
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 11h11M4 16h14"/></svg>
           弾幕
         </button>
-        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v8</span>
+        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v9</span>
         <span class="spacer"></span>
-        <label class="tlabel" for="sinkSel">音声出力先（スペース全体）</label>
+        <label class="tlabel" for="sinkSel">音声出力先</label>
         <select id="sinkSel"><option value="">既定のデバイス</option></select>
         <button type="button" id="sinkRefresh">デバイス取得</button>
         <button type="button" id="sinkPick">選んで適用</button>
@@ -271,7 +271,7 @@
       </div>
       <div class="trow">
         <span id="sinkStatus" role="status" aria-live="polite">出力先を確認中…</span>
-        <span class="note">Chrome / Edge では、ここで選んだデバイスからスペース全体（全窓の Twitch 埋め込み含む）の音が出ます。出力先を変えると、開いている窓のプレイヤーは自動で読み直されます（Twitch 埋め込みは読み込まれた時点の出力先で音を出し続けるため、読み直さないと前のデバイスから鳴り続けます）。読み直した窓はミュートで始まるので、プレイヤー側でミュートを解除してください。他のブラウザではこの切り替え自体が使えません。その場合は OS の「アプリごとの出力先」で、このスペースを開いているブラウザごと別デバイスに割り当ててください。</span>
+        <span class="note">まず「テスト音」で確認してください。テスト音はこのページ自身の音（Web Audio）で、Chrome / Edge ではここで選んだデバイスから鳴ります。配信（Twitch埋め込み）の音は別ドキュメントの音で、ブラウザがページの既定出力先を埋め込み側へ渡す場合にだけ一緒に切り替わります。切り替えに成功すると開いている窓のプレイヤーは自動で読み直されます（読み直した窓はミュートで始まるので、プレイヤー側でミュートを解除してください）。テスト音すら切り替わらない場合は、このブラウザ・環境ではページ内からの出力先指定自体が効いていません。</span>
       </div>
       <div class="trow">
         <span class="tlabel">お気に入り</span>
@@ -913,21 +913,50 @@
         });
 
         /* ---------------- audio output device (page-wide) ----------------
-           方式：Audio Output Devices API の setDefaultSinkId で、このページ
-           （＝このスペース）全体の既定の出力先を切り替える。個別に sinkId を
-           指定していない音はすべて従うため、全窓の Twitch 埋め込みプレイヤー
-           の音も一緒に切り替わる。対応は Chrome / Edge のみ。それ以外では
-           OS 側でブラウザごとに出力先を割り当てるしかない（案内を表示する）。
-           注意：Twitch 埋め込みプレイヤーは読み込まれた時点の既定出力先で
-           音声出力を開始するため、setDefaultSinkId を呼んだだけでは再生中の
-           プレイヤーが前のデバイスから鳴り続けることがある。そのため出力先の
-           切り替えに成功したら、開いている全窓のプレイヤーを自動で読み直し、
-           新しい出力先で音声を開始させる（applySink(true)）。 */
+           試みる経路は3つで、成否は隠さずステータスに表示する。
+           1) AudioContext.setSinkId（Web Audio）：ページ自身の音（テスト音）
+              の出力先。Chrome / Edge で最も確実に効く経路。
+           2) HTMLMediaElement.setSinkId：メディア要素単体の出力先。
+           3) MediaDevices.setDefaultSinkId：ページ全体の既定出力先。
+              Twitch 埋め込みは別ドキュメント（クロスオリジン iframe）で
+              音を出しているため、この既定が埋め込み側へ渡るかどうかは
+              ブラウザ次第で、渡らなければ配信の音は切り替わらない。
+              渡る環境でも、埋め込みは読み込まれた時点の出力先で鳴り続ける
+              ため、切り替え成功時は全窓のプレイヤーを読み直す。
+           どの経路も効かない環境では、ページ側のコードでは切り替えられず、
+           OS の「アプリごとの出力先」でブラウザごとに割り当てるしかない。 */
         var sinkSel = document.getElementById("sinkSel");
         var testAudio = document.getElementById("testAudio");
         var sinkStatus = document.getElementById("sinkStatus");
         var pageSinkSupported = !!(navigator.mediaDevices && typeof navigator.mediaDevices.setDefaultSinkId === "function");
         var elemSinkSupported = typeof testAudio.setSinkId === "function";
+
+        /* テスト音は Web Audio で鳴らす。AudioContext.setSinkId は
+           メディア要素の setSinkId より確実にデバイスへ届くため、
+           「ページ側の切り替え自体が効いているか」の切り分けに使う。 */
+        var audioCtx = null;
+        function ensureCtx() {
+          if (audioCtx) return audioCtx;
+          var AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) return null;
+          try { audioCtx = new AC(); } catch (e) { return null; }
+          return audioCtx;
+        }
+        function beepViaCtx(ctx) {
+          if (ctx.state === "suspended") ctx.resume();
+          var t0 = ctx.currentTime + 0.03;
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.value = 880;
+          gain.gain.setValueAtTime(0.0001, t0);
+          gain.gain.exponentialRampToValueAtTime(0.3, t0 + 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t0);
+          osc.stop(t0 + 0.55);
+        }
 
         function setSinkStatus(text, kind) {
           sinkStatus.textContent = text;
@@ -972,56 +1001,67 @@
             }
           });
         }
+        /* 3経路すべてに適用を試み、経路ごとの成否（results）を返す。
+           results.page / .elem / .ctx は null=未対応、true=成功、それ以外=失敗したエラー。 */
         function applySink(reloadAfter) {
           var md = navigator.mediaDevices;
+          var results = { page: null, elem: null, ctx: null };
           var jobs = [];
-          var failures = [];
-          if (elemSinkSupported) {
-            jobs.push(testAudio.setSinkId(state.sinkId).catch(function (e) { failures.push(e); }));
+          function track(key, promise) {
+            jobs.push(Promise.resolve(promise).then(
+              function () { results[key] = true; },
+              function (e) { results[key] = e || new Error("unknown"); }
+            ));
           }
+          if (elemSinkSupported) track("elem", testAudio.setSinkId(state.sinkId));
           if (pageSinkSupported) {
             /* 既定（sinkId が空）のときも必ず呼ぶ：setDefaultSinkId("") で
                ページ全体の既定出力先がリセットされ、前に選んだデバイスが
                残ったままにならない。 */
-            jobs.push(md.setDefaultSinkId(state.sinkId).catch(function (e) { failures.push(e); }));
+            track("page", md.setDefaultSinkId(state.sinkId));
           }
+          var ctx = ensureCtx();
+          if (ctx && typeof ctx.setSinkId === "function") track("ctx", ctx.setSinkId(state.sinkId));
+
           return Promise.all(jobs).then(function () {
-            if (!pageSinkSupported && !elemSinkSupported) {
+            function failed(v) { return v !== null && v !== true; }
+            var testOk = results.ctx === true || results.elem === true;
+            if (!pageSinkSupported && !elemSinkSupported && results.ctx === null) {
               setSinkStatus("このブラウザは出力先の切り替えに未対応です。Chrome / Edge で開くか、OS の設定でブラウザごとに出力先を割り当ててください。", "bad");
-              return;
+              return results;
             }
-            if (failures.length) {
-              if (pageSinkSupported) {
-                setSinkStatus("切り替えに失敗しました：" + sinkErrorText(failures[0]), "bad");
+            if (failed(results.page)) {
+              setSinkStatus("ページ全体の出力先切り替えに失敗しました：" + sinkErrorText(results.page) + (testOk ? "（テスト音の経路は成功しています）" : ""), "bad");
+              return results;
+            }
+            if (!pageSinkSupported) {
+              if (testOk) {
+                setSinkStatus("テスト音は「" + selectedSinkLabel() + "」に切り替わりますが、このブラウザではページ全体の切り替えができないため配信の音は切り替わりません。配信も切り替えるには Chrome / Edge が必要です。", "warn");
+              } else if (failed(results.ctx) || failed(results.elem)) {
+                setSinkStatus("出力先の指定に失敗しました：" + sinkErrorText(failed(results.ctx) ? results.ctx : results.elem), "bad");
               } else {
-                setSinkStatus("このブラウザではページ全体の切り替えはできず、テスト音だけが切り替わりました。配信の音を切り替えるには Chrome / Edge で開いてください。", "warn");
+                setSinkStatus("このブラウザは出力先の切り替えに未対応です。Chrome / Edge で開くか、OS の設定でブラウザごとに出力先を割り当ててください。", "bad");
               }
-              return;
+              return results;
             }
-            /* 切り替え成功：埋め込み側にも直接適用を試み、再生中のプレイヤーは
-               新しい出力先で開始し直すために読み直す。 */
+            /* ページ全体の既定は切り替わった。埋め込み側にも直接適用を試み、
+               再生中のプレイヤーは新しい出力先で開始し直すために読み直す。
+               ただし埋め込みが既定を受け取るかはブラウザ次第（注記参照）。 */
             applySinkToFrames();
             var reloaded = 0;
-            if (pageSinkSupported && reloadAfter) {
+            if (reloadAfter) {
               reloaded = reloadPlayers();
               if (reloaded) applySinkToFrames();
             }
             var reloadNote = reloaded
-              ? "開いている窓のプレイヤーを読み直したので、音は新しい出力先から出ます（読み直した窓はミュートで始まるので、プレイヤーでミュートを解除してください）。"
+              ? "開いている窓のプレイヤーを読み直しました（読み直した窓はミュートで始まるので、プレイヤーでミュートを解除してください）。"
               : "";
             if (!state.sinkId) {
-              if (pageSinkSupported) {
-                setSinkStatus("既定のデバイスで再生中です。" + reloadNote, "ok");
-              } else {
-                setSinkStatus("既定のデバイスで再生中です（このブラウザでは配信の音は切り替わりません）。", "warn");
-              }
-              return;
-            }
-            if (pageSinkSupported) {
-              setSinkStatus("適用中：「" + selectedSinkLabel() + "」— " + (reloadNote || "スペース全体（全窓の配信含む）の音がこのデバイスから出ます。"), "ok");
+              setSinkStatus("既定のデバイスに戻しました。" + reloadNote, "ok");
             } else {
-              setSinkStatus("テスト音だけ「" + selectedSinkLabel() + "」に切り替えました。配信の音の切り替えは Chrome / Edge が必要です。", "warn");
+              setSinkStatus("出力先を「" + selectedSinkLabel() + "」に切り替えました。" + reloadNote + "配信の音が切り替わらない場合は、埋め込み側へ既定が渡っていない環境です。まず「テスト音」でページ側の切り替えが効くか確認してください。", "ok");
             }
+            return results;
           });
         }
         function refreshDevices(withLabels) {
@@ -1046,7 +1086,7 @@
             if (state.sinkId) sinkSel.value = state.sinkId;
             if (withLabels) {
               var named = outs.filter(function (d) { return d.deviceId !== "default"; }).length;
-              setSinkStatus(named ? ("出力デバイスを " + named + " 件取得しました。一覧から選ぶとスペース全体に適用されます。") : "出力デバイスが見つかりませんでした。ヘッドホンやスピーカーを接続してから取り直してください。", named ? "" : "warn");
+              setSinkStatus(named ? ("出力デバイスを " + named + " 件取得しました。一覧から選ぶと出力先の切り替えを試みます。") : "出力デバイスが見つかりませんでした。ヘッドホンやスピーカーを接続してから取り直してください。", named ? "" : "warn");
             }
           }).catch(function () {
             if (withLabels) setSinkStatus("デバイス一覧を取得できませんでした。", "bad");
@@ -1054,7 +1094,7 @@
         }
         function updateSinkSupportUI() {
           if (pageSinkSupported) {
-            setSinkStatus("対応ブラウザです。一覧から選ぶと、スペース全体の音の出力先が切り替わります。", "ok");
+            setSinkStatus("対応ブラウザです。一覧から選んで切り替え、「テスト音」で実際に鳴るデバイスを確認してください。", "ok");
           } else if (elemSinkSupported) {
             setSinkStatus("このブラウザはスペース全体の切り替えに未対応です（テスト音のみ切り替わります）。Chrome / Edge で開くと配信の音ごと切り替わります。", "warn");
           } else {
@@ -1102,13 +1142,26 @@
         document.getElementById("sinkReload").addEventListener("click", function () {
           var n = reloadPlayers();
           if (n) applySinkToFrames();
-          setSinkStatus("全窓のプレイヤーを読み直しました。音は現在の出力先（" + selectedSinkLabel() + "）で再生されます（読み直した窓はミュートで始まるので解除してください）。", pageSinkSupported ? "ok" : "");
+          setSinkStatus("全窓のプレイヤーを読み直しました。現在の出力先設定（" + selectedSinkLabel() + "）で再生し直されます（読み直した窓はミュートで始まるので解除してください）。", pageSinkSupported ? "ok" : "");
         });
         document.getElementById("sinkTest").addEventListener("click", function () {
-          if (!testAudio.src) testAudio.src = makeBeepURL();
-          applySink(false).then(function () {
+          applySink(false).then(function (results) {
+            var ctx = ensureCtx();
+            if (ctx) {
+              beepViaCtx(ctx);
+              if (results && results.ctx === true) {
+                setSinkStatus("テスト音を「" + selectedSinkLabel() + "」で鳴らしました（Web Audio 経由）。選んだデバイスから聞こえていれば、ページ側の切り替え自体は効いています。それでも配信だけ切り替わらない場合は、埋め込み側へ既定が渡っていないのが原因です。", "ok");
+              } else if (results && results.ctx !== null && results.ctx !== true) {
+                setSinkStatus("テスト音の出力先指定に失敗しました：" + sinkErrorText(results.ctx), "bad");
+              } else {
+                setSinkStatus("テスト音を鳴らしました。このブラウザは Web Audio の出力先指定に未対応のため、既定のデバイスから出ています。", "warn");
+              }
+              return;
+            }
+            if (!testAudio.src) testAudio.src = makeBeepURL();
             testAudio.currentTime = 0;
             testAudio.play().catch(function () {});
+            setSinkStatus("テスト音を「" + selectedSinkLabel() + "」で鳴らしました。", "");
           });
         });
         if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
