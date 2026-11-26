@@ -324,7 +324,7 @@
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 11h11M4 16h14"/></svg>
           弾幕
         </button>
-        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v12</span>
+        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v13</span>
         <span class="spacer"></span>
         <label class="tlabel" for="sinkSel">音声出力先</label>
         <select id="sinkSel"><option value="">既定のデバイス</option></select>
@@ -354,7 +354,7 @@
             <li>「パッケージ化されていない拡張機能を読み込む」を押し、展開したフォルダを選ぶ。</li>
             <li>このページを再読み込みし、「連携を確認」で接続できたら、「拡張でこのタブの音を切り替える」を押す。出力先は上の「音声出力先」で選んだデバイスが使われ、再生中に変えると拡張側へも適用される。</li>
             <li>止めるときは「拡張の音声を停止」。元のタブのミュートも解除される。</li>
-            <li>以前の版（v1.0.0）を入れている場合は、上のZIPを取り直し、chrome://extensions で古い拡張機能を一度削除してから新しいフォルダを読み込み直してください（ファイルの差し替えだけでは更新されません）。v1.1.0 では、開始時に「Extension has not been invoked…」と出る権限エラーを直しています。</li>
+            <li>以前の版（v1.1.0 以前）を入れている場合は、上のZIPを取り直し、chrome://extensions で古い拡張機能を一度削除してから新しいフォルダを読み込み直してください（ファイルの差し替えだけでは更新されません）。v1.2.0 では、開始時に「失敗: unknown type」と表示されて音が消える不具合と、拡張側でデバイスが取得できない不具合を直しています（合図に宛先を持たせて応答の競合をなくし、デバイスは拡張側で列挙し直してラベルと順番で対応付けます）。</li>
             <li>それでも同じエラーが出る場合は、ツールバーの拡張機能アイコンをクリックしてポップアップを開き、そこの「開始」を押してください（ポップアップを開く操作が、そのタブでの拡張機能の呼び出しになります）。chrome:// などのブラウザ内蔵ページはキャプチャできないので、ビューアのタブで実行してください。</li>
           </ol>
           <div class="ext-files">
@@ -1021,6 +1021,7 @@
         var sinkStatus = document.getElementById("sinkStatus");
         var pageSinkSupported = !!(navigator.mediaDevices && typeof navigator.mediaDevices.setDefaultSinkId === "function");
         var elemSinkSupported = typeof testAudio.setSinkId === "function";
+        var pageOuts = []; /* ページ側で列挙した出力デバイス（"default" を除く列挙順）。拡張側との対応付け（ラベル／順番）に使う */
 
         /* テスト音は Web Audio で鳴らす。AudioContext.setSinkId は
            メディア要素の setSinkId より確実にデバイスへ届くため、
@@ -1166,6 +1167,7 @@
           }
           prep.then(function () { return md.enumerateDevices(); }).then(function (devs) {
             var outs = devs.filter(function (d) { return d.kind === "audiooutput"; });
+            pageOuts = outs.filter(function (d) { return d.deviceId !== "default"; });
             sinkSel.innerHTML = '<option value="">既定のデバイス</option>';
             outs.forEach(function (d, i) {
               if (d.deviceId === "default") return;
@@ -1296,13 +1298,26 @@
            合図の中継はトップフレームだけに限定した（iframe 側からも中継すると
            開始リクエストが二重に飛んで競合する）。それでも呼び出しエラーが
            出る環境では、拡張アイコンのポップアップから開始する（ポップアップを
-           開く操作自体が、そのタブでの拡張の呼び出しとして扱われる）。 */
+           開く操作自体が、そのタブでの拡張の呼び出しとして扱われる）。
+           拡張 v1.2.0 での修正：runtime.sendMessage は拡張内の全コンテキストへ
+           一斉送信されるため、background と offscreen が互い宛ての合図にも
+           "unknown type" で即答し、本来の応答と競合して先勝ちしていた
+           （開始が「失敗: unknown type」になり、状態によってはタブだけ
+           ミュートされて音が消えた）。全合図に target（background /
+           offscreen）を持たせ、自分宛てでない合図と未知の type には
+           応答しないようにした。あわせて開始失敗時はタブのミュートを
+           必ず解除する。デバイス取得も修理：deviceId はオリジンごとに
+           値が違うため、ページの ID は拡張側で使えない。ページからは
+           ラベルと列挙順も渡し、offscreen が自分の側で列挙し直して
+           対応付ける。デバイス一覧は MADOCCHI_LIST_DEVICES →
+           OFFSCREEN_LIST_DEVICES の経路で取得し、ページの連携確認と
+           ポップアップの一覧表示に使う。 */
         var EXT_FILES = {};
         EXT_FILES["manifest.json"] = [
           '{',
           '  "manifest_version": 3,',
           '  "name": "まどっち音声ブリッジ",',
-          '  "version": "1.1.0",',
+          '  "version": "1.2.0",',
           '  "description": "まどっち風マルチビューアのタブ音声を、選んだ出力デバイスで再生し直す拡張機能",',
           '  "permissions": ["tabCapture", "offscreen", "tabs", "activeTab"],',
           '  "host_permissions": ["*://*/*"],',
@@ -1326,9 +1341,9 @@
           '   橋渡しはトップフレームだけで行う：iframe（Twitch埋め込み等）側でも',
           '   中継すると開始リクエストが二重に飛び、キャプチャが競合するため。 */',
           'if (window.top === window) {',
-          'document.documentElement.setAttribute("data-madocchi-ext", "1.1.0");',
+          'document.documentElement.setAttribute("data-madocchi-ext", "1.2.0");',
           'function announce() {',
-          '  window.postMessage({ source: "madocchi-ext", type: "MADOCCHI_EXT_READY", version: "1.1.0" }, "*");',
+          '  window.postMessage({ source: "madocchi-ext", type: "MADOCCHI_EXT_READY", version: "1.2.0" }, "*");',
           '}',
           'announce();',
           'window.addEventListener("DOMContentLoaded", announce);',
@@ -1336,7 +1351,8 @@
           '  if (ev.source !== window) return;',
           '  var d = ev.data;',
           '  if (!d || d.source !== "madocchi-page") return;',
-          '  chrome.runtime.sendMessage({ type: d.type, deviceId: d.deviceId || "" }, function (res) {',
+          '  if (typeof d.type !== "string" || d.type.indexOf("MADOCCHI_") !== 0) return;',
+          '  chrome.runtime.sendMessage({ type: d.type, target: "background", deviceId: d.deviceId || "", deviceLabel: d.deviceLabel || "", deviceIndex: (typeof d.deviceIndex === "number" ? d.deviceIndex : -1) }, function (res) {',
           '    var err = chrome.runtime.lastError;',
           '    window.postMessage({',
           '      source: "madocchi-ext",',
@@ -1363,6 +1379,8 @@
           '   （キャプチャはミュートより前段で取られるため音は途切れない）。 */',
           'var captureTabId = null;',
           'var currentDeviceId = "";',
+          'var currentDeviceLabel = "";',
+          'var currentDeviceIndex = -1;',
           'var lastStatus = "idle";',
           'function notifyTab(tabId, state) {',
           '  if (tabId == null) return;',
@@ -1384,20 +1402,26 @@
           '  var tabs = await chrome.tabs.query({ active: true, currentWindow: true });',
           '  return tabs.length ? tabs[0].id : null;',
           '}',
-          'async function startCapture(tabId, deviceId) {',
+          'async function startCapture(tabId, deviceId, deviceLabel, deviceIndex) {',
           '  currentDeviceId = deviceId || "";',
+          '  currentDeviceLabel = deviceLabel || "";',
+          '  currentDeviceIndex = (typeof deviceIndex === "number" ? deviceIndex : -1);',
           '  var streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });',
           '  await ensureOffscreen();',
-          '  var res = await chrome.runtime.sendMessage({ type: "OFFSCREEN_START", streamId: streamId, deviceId: currentDeviceId });',
+          '  var res = await chrome.runtime.sendMessage({ type: "OFFSCREEN_START", target: "offscreen", streamId: streamId, deviceId: currentDeviceId, deviceLabel: currentDeviceLabel, deviceIndex: currentDeviceIndex });',
           '  if (res && res.ok) {',
           '    captureTabId = tabId;',
           '    await chrome.tabs.update(tabId, { muted: true });',
           '    lastStatus = "capturing";',
+          '  } else {',
+          '    /* 再生が始まらなかったのにタブだけミュートされると音が消えたままになるため、失敗時は必ずミュートを戻す */',
+          '    captureTabId = null;',
+          '    try { await chrome.tabs.update(tabId, { muted: false }); } catch (e) {}',
           '  }',
           '  return res;',
           '}',
           'async function stopCapture() {',
-          '  try { await chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP" }); } catch (e) {}',
+          '  try { await chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP", target: "offscreen" }); } catch (e) {}',
           '  var tabId = captureTabId;',
           '  if (captureTabId != null) {',
           '    try { await chrome.tabs.update(captureTabId, { muted: false }); } catch (e) {}',
@@ -1410,21 +1434,24 @@
           'chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {',
           '  (async function () {',
           '    try {',
+          '      if (msg.target === "offscreen") { return; }',
           '      if (msg.type === "MADOCCHI_PING") {',
-          '        sendResponse({ ok: true, version: "1.1.0", capturing: captureTabId != null, deviceId: currentDeviceId, status: lastStatus });',
+          '        sendResponse({ ok: true, version: "1.2.0", capturing: captureTabId != null, deviceId: currentDeviceId, status: lastStatus });',
           '      } else if (msg.type === "MADOCCHI_START") {',
           '        var tabId = await resolveTabId(sender);',
           '        if (tabId == null) { sendResponse({ ok: false, error: "対象タブが見つかりません" }); return; }',
           '        var tabInfo = null;',
           '        try { tabInfo = await chrome.tabs.get(tabId); } catch (e) {}',
           '        if (!tabInfo || !/^https?:\\/\\//.test(tabInfo.url || "")) { sendResponse({ ok: false, error: "このページはキャプチャできません（chrome:// などのブラウザ内蔵ページが対象になっています）。ビューアを開いているタブを前面にして実行してください。" }); return; }',
-          '        var r = await startCapture(tabId, msg.deviceId);',
+          '        var r = await startCapture(tabId, msg.deviceId, msg.deviceLabel, msg.deviceIndex);',
           '        sendResponse(r || { ok: true });',
           '        if (r && r.ok) notifyTab(tabId, { capturing: true, deviceId: currentDeviceId });',
           '      } else if (msg.type === "MADOCCHI_SET_DEVICE") {',
           '        currentDeviceId = msg.deviceId || "";',
+          '        currentDeviceLabel = msg.deviceLabel || "";',
+          '        currentDeviceIndex = (typeof msg.deviceIndex === "number" ? msg.deviceIndex : -1);',
           '        if (captureTabId != null) {',
-          '          var r2 = await chrome.runtime.sendMessage({ type: "OFFSCREEN_SET_DEVICE", deviceId: currentDeviceId });',
+          '          var r2 = await chrome.runtime.sendMessage({ type: "OFFSCREEN_SET_DEVICE", target: "offscreen", deviceId: currentDeviceId, deviceLabel: currentDeviceLabel, deviceIndex: currentDeviceIndex });',
           '          sendResponse(r2 || { ok: true });',
           '        } else {',
           '          sendResponse({ ok: true, note: "次回開始時に適用されます" });',
@@ -1433,12 +1460,16 @@
           '        var t = await stopCapture();',
           '        sendResponse({ ok: true });',
           '        if (t != null) notifyTab(t, { capturing: false, deviceId: currentDeviceId });',
+          '      } else if (msg.type === "MADOCCHI_LIST_DEVICES") {',
+          '        await ensureOffscreen();',
+          '        var rd = await chrome.runtime.sendMessage({ type: "OFFSCREEN_LIST_DEVICES", target: "offscreen" });',
+          '        sendResponse(rd || { ok: false, error: "offscreenから応答がありませんでした" });',
           '      } else if (msg.type === "OFFSCREEN_STATUS") {',
           '        lastStatus = msg.status || lastStatus;',
           '        if (captureTabId != null) notifyTab(captureTabId, { capturing: captureTabId != null, deviceId: currentDeviceId, detail: msg.detail || "" });',
           '        sendResponse({ ok: true });',
           '      } else {',
-          '        sendResponse({ ok: false, error: "unknown type" });',
+          '        /* 未知のtypeや自分宛てでない合図には応答しない。応答してしまうと、runtime.sendMessage は拡張内の全コンテキストへ一斉送信されるため、本来の宛先（offscreen等）の正常な応答と競合し、先に応答した "unknown type" が勝って開始が失敗する（v1.1.0までの不具合） */',
           '      }',
           '    } catch (e) {',
           '      var em = String((e && e.message) || e);',
@@ -1473,27 +1504,44 @@
           '   確認できたのと同じ、メディア要素への直接指定の経路。 */',
           'var player = document.getElementById("player");',
           'var stream = null;',
-          'async function applyDevice(id) {',
+          'async function resolveDeviceId(id, label, index) {',
+          '  /* deviceId はオリジンごとに異なる値になるため、ページ（ビューアの配信元）で取得したIDは拡張側ではそのまま使えない。拡張側で列挙し直し、ID→ラベル→順番の順で対応するデバイスを探す */',
+          '  var devs = await navigator.mediaDevices.enumerateDevices();',
+          '  var outs = devs.filter(function (d) { return d.kind === "audiooutput" && d.deviceId !== "default"; });',
+          '  if (!id) return "";',
+          '  var i;',
+          '  for (i = 0; i < outs.length; i++) { if (outs[i].deviceId === id) return id; }',
+          '  if (label) { for (i = 0; i < outs.length; i++) { if (outs[i].label && outs[i].label === label) return outs[i].deviceId; } }',
+          '  if (typeof index === "number" && index >= 0 && index < outs.length) return outs[index].deviceId;',
+          '  return "";',
+          '}',
+          'async function applyDevice(id, label, index) {',
           '  if (typeof player.setSinkId !== "function") throw new Error("このブラウザは setSinkId に未対応です");',
-          '  await player.setSinkId(id || "");',
+          '  var resolved = await resolveDeviceId(id || "", label || "", (typeof index === "number" ? index : -1));',
+          '  await player.setSinkId(resolved);',
           '}',
           'function report(status, detail) {',
-          '  chrome.runtime.sendMessage({ type: "OFFSCREEN_STATUS", status: status, detail: detail || "" }).catch(function () {});',
+          '  chrome.runtime.sendMessage({ type: "OFFSCREEN_STATUS", target: "background", status: status, detail: detail || "" }).catch(function () {});',
           '}',
           'chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {',
           '  (async function () {',
           '    try {',
-          '      if (msg.type === "OFFSCREEN_START") {',
+          '      if (msg.target !== "offscreen") { return; }',
+          '      if (msg.type === "OFFSCREEN_LIST_DEVICES") {',
+          '        var allDevs = await navigator.mediaDevices.enumerateDevices();',
+          '        var outList = allDevs.filter(function (d) { return d.kind === "audiooutput"; }).map(function (d) { return { deviceId: d.deviceId, label: d.label || "" }; });',
+          '        sendResponse({ ok: true, devices: outList });',
+          '      } else if (msg.type === "OFFSCREEN_START") {',
           '        stream = await navigator.mediaDevices.getUserMedia({',
           '          audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: msg.streamId } }',
           '        });',
           '        player.srcObject = stream;',
-          '        await applyDevice(msg.deviceId || "");',
+          '        await applyDevice(msg.deviceId || "", msg.deviceLabel || "", msg.deviceIndex);',
           '        await player.play();',
           '        report("capturing", "");',
           '        sendResponse({ ok: true });',
           '      } else if (msg.type === "OFFSCREEN_SET_DEVICE") {',
-          '        await applyDevice(msg.deviceId || "");',
+          '        await applyDevice(msg.deviceId || "", msg.deviceLabel || "", msg.deviceIndex);',
           '        report("capturing", "device applied");',
           '        sendResponse({ ok: true });',
           '      } else if (msg.type === "OFFSCREEN_STOP") {',
@@ -1502,9 +1550,11 @@
           '        report("idle", "");',
           '        sendResponse({ ok: true });',
           '      } else {',
-          '        sendResponse({ ok: false, error: "unknown type" });',
+          '        /* 未知のtypeや自分宛てでない合図には応答しない（background宛ての合図へ応答すると本来の応答と競合し "unknown type" が勝ってしまう。v1.1.0までの不具合の主因） */',
           '      }',
           '    } catch (e) {',
+          '      if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }',
+          '      player.srcObject = null;',
           '      report("error", String((e && e.message) || e));',
           '      sendResponse({ ok: false, error: String((e && e.message) || e) });',
           '    }',
@@ -1544,22 +1594,38 @@
           'var sel = document.getElementById("dev");',
           'var statusEl = document.getElementById("st");',
           'async function loadDevices() {',
-          '  var devs = await navigator.mediaDevices.enumerateDevices();',
+          '  /* まず background 経由で offscreen に列挙させる（実際に再生する側の一覧と一致し、ポップアップ自身の列挙が空になる環境でも取得できる）。失敗したら自分で列挙し、それも失敗したら理由をステータスに出す */',
+          '  var list = null;',
+          '  try {',
+          '    var r = await chrome.runtime.sendMessage({ type: "MADOCCHI_LIST_DEVICES", target: "background" });',
+          '    if (r && r.ok && Array.isArray(r.devices)) list = r.devices;',
+          '  } catch (e) {}',
+          '  if (!list) {',
+          '    try {',
+          '      var devs = await navigator.mediaDevices.enumerateDevices();',
+          '      list = devs.filter(function (d) { return d.kind === "audiooutput"; });',
+          '    } catch (e) {',
+          '      statusEl.textContent = "デバイス取得に失敗: " + ((e && e.message) || e);',
+          '      return;',
+          '    }',
+          '  }',
           '  var cur = sel.value;',
           '  sel.innerHTML = "";',
           '  var def = document.createElement("option");',
           '  def.value = ""; def.textContent = "既定のデバイス";',
           '  sel.appendChild(def);',
-          '  devs.filter(function (d) { return d.kind === "audiooutput" && d.deviceId !== "default"; }).forEach(function (d, i) {',
+          '  list.filter(function (d) { return d.deviceId !== "default"; }).forEach(function (d, i) {',
           '    var o = document.createElement("option");',
           '    o.value = d.deviceId;',
           '    o.textContent = d.label || ("出力デバイス " + (i + 1));',
           '    sel.appendChild(o);',
           '  });',
           '  sel.value = cur;',
+          '  if (sel.options.length <= 1) statusEl.textContent = "出力デバイスが見つかりませんでした。デバイスを接続してから開き直してください。";',
           '}',
           'function send(type) {',
-          '  chrome.runtime.sendMessage({ type: type, deviceId: sel.value }, function (r) {',
+          '  var opt = sel.options[sel.selectedIndex];',
+          '  chrome.runtime.sendMessage({ type: type, target: "background", deviceId: sel.value, deviceLabel: sel.value && opt ? opt.textContent : "", deviceIndex: sel.selectedIndex - 1 }, function (r) {',
           '    if (chrome.runtime.lastError) { statusEl.textContent = "失敗: " + chrome.runtime.lastError.message; return; }',
           '    statusEl.textContent = r && r.ok ? "完了しました" : ("失敗: " + ((r && r.error) || "不明"));',
           '  });',
@@ -1575,7 +1641,7 @@
           'document.getElementById("apply").addEventListener("click", function () { send("MADOCCHI_SET_DEVICE"); });',
           'document.getElementById("stop").addEventListener("click", function () { send("MADOCCHI_STOP"); });',
           'loadDevices();',
-          'chrome.runtime.sendMessage({ type: "MADOCCHI_PING" }, function (r) {',
+          'chrome.runtime.sendMessage({ type: "MADOCCHI_PING", target: "background" }, function (r) {',
           '  if (r && r.ok) statusEl.textContent = r.capturing ? "再生中（出力先は拡張機能が担当）" : "待機中";',
           '});'
         ].join("\n");
@@ -1608,6 +1674,8 @@
           '## うまくいかないとき',
           '',
           '- 「Extension has not been invoked for the current page」と出たら、このフォルダが v1.1.0 以降か確認し、chrome://extensions で拡張機能を削除して読み込み直す。それでも出る場合は、ツールバーの拡張機能アイコンをクリックしてポップアップを開き、そこの「開始」を押す（ポップアップを開く操作が、そのタブでの拡張機能の呼び出しになる）',
+          '- 「失敗: unknown type」と出て音が消えたら、このフォルダが v1.2.0 か確認し、chrome://extensions で拡張機能を削除して読み込み直す（v1.1.0 までは、background と offscreen が互い宛ての合図に "unknown type" で応答して競合する不具合があった）',
+          '- ポップアップやビューアで拡張側のデバイスが取れない場合も v1.2.0 に入れ直す（v1.2.0 ではデバイス一覧を background 経由で offscreen から取得し、出力先はラベルと順番で対応付ける）',
           '- chrome:// などのブラウザ内蔵ページはキャプチャできない。ビューアを開いているタブで実行すること',
           '- 拡張機能のファイルを差し替えたら、chrome://extensions で再読み込み（または削除して読み込み直し）をすること。差し替えだけでは古い版が動き続ける',
           '',
@@ -1632,7 +1700,21 @@
           extStartBtn.textContent = extCapturing ? "拡張で再生中（出力先は上の選択）" : "拡張でこのタブの音を切り替える";
           extStopBtn.disabled = !extCapturing;
         }
-        function extSend(type, deviceId) {
+        /* 拡張へ渡す出力先一式。deviceId はオリジンごとに値が違うため、
+           拡張側で対応デバイスを探せるようラベルと列挙順も一緒に渡す。 */
+        function extDevicePayload() {
+          var idx = -1;
+          for (var i = 0; i < pageOuts.length; i++) {
+            if (pageOuts[i].deviceId === state.sinkId) { idx = i; break; }
+          }
+          return {
+            deviceId: state.sinkId,
+            deviceLabel: state.sinkId ? selectedSinkLabel() : "",
+            deviceIndex: idx
+          };
+        }
+        function extSend(type, payload) {
+          payload = payload || {};
           return new Promise(function (resolve, reject) {
             var id = ++extReqSeq;
             var timer = setTimeout(function () {
@@ -1640,7 +1722,7 @@
               reject(new Error("拡張機能から応答がありません。未インストールか、このページで読み込まれていません。"));
             }, 3000);
             extPending[id] = { resolve: resolve, reject: reject, timer: timer };
-            window.postMessage({ source: "madocchi-page", type: type, requestId: id, deviceId: deviceId || "" }, "*");
+            window.postMessage({ source: "madocchi-page", type: type, requestId: id, deviceId: payload.deviceId || "", deviceLabel: payload.deviceLabel || "", deviceIndex: (typeof payload.deviceIndex === "number" ? payload.deviceIndex : -1) }, "*");
           });
         }
         window.addEventListener("message", function (ev) {
@@ -1668,8 +1750,25 @@
             extInstalled = true;
             extCapturing = !!res.capturing;
             updateExtUI();
-            if (extCapturing) setExtStatus("拡張機能と連携中：このタブの音声を再生中です。", "ok");
-            else setExtStatus("拡張機能と連携中（v" + (res.version || "?") + "）。「拡張でこのタブの音を切り替える」で開始できます。", "ok");
+            var base = extCapturing
+              ? "拡張機能と連携中：このタブの音声を再生中です。"
+              : "拡張機能と連携中（v" + (res.version || "?") + "）。「拡張でこのタブの音を切り替える」で開始できます。";
+            setExtStatus(base, "ok");
+            /* 拡張側（offscreen）でもデバイス一覧が取れるか照合する。
+               旧版の拡張ではこの合図に対応していないため、失敗しても連携自体は成立として扱う。 */
+            extSend("MADOCCHI_LIST_DEVICES").then(function (lr) {
+              if (!lr || !Array.isArray(lr.devices)) return;
+              var outs = lr.devices.filter(function (d) { return d.deviceId !== "default"; });
+              var note = "拡張側の出力デバイス " + outs.length + " 件を確認しました。";
+              if (state.sinkId) {
+                var lbl = selectedSinkLabel();
+                var match = outs.some(function (d) { return d.label && d.label === lbl; });
+                note += match
+                  ? "選択中の「" + lbl + "」は拡張側でも見つかりました。"
+                  : "選択中のデバイス名は拡張側で見つからなかったため、開始時は一覧の順番で対応付けます。";
+              }
+              if (!extCapturing) setExtStatus(base + note, "ok");
+            }).catch(function () {});
             return res;
           }).catch(function (e) {
             extInstalled = false;
@@ -1683,7 +1782,7 @@
         });
         extStartBtn.addEventListener("click", function () {
           setExtStatus("拡張機能で音声の取得を開始しています…", "");
-          extSend("MADOCCHI_START", state.sinkId).then(function () {
+          extSend("MADOCCHI_START", extDevicePayload()).then(function () {
             extInstalled = true;
             extCapturing = true;
             updateExtUI();
@@ -1704,7 +1803,7 @@
         /* 再生中に出力先が変わったら、拡張側へもそのまま伝える */
         sinkSel.addEventListener("change", function () {
           if (!extCapturing) return;
-          extSend("MADOCCHI_SET_DEVICE", state.sinkId).then(function () {
+          extSend("MADOCCHI_SET_DEVICE", extDevicePayload()).then(function () {
             setExtStatus("出力先を「" + selectedSinkLabel() + "」に変更し、拡張機能にも適用しました。", "ok");
           }).catch(function (e) {
             setExtStatus("拡張機能への出力先適用に失敗しました：" + e.message, "bad");
