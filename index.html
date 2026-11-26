@@ -324,7 +324,7 @@
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 11h11M4 16h14"/></svg>
           弾幕
         </button>
-        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v14</span>
+        <span class="version" id="appVersion" title="ビルドのバージョン（変更が反映されたか確認するための目印）">v15</span>
         <span class="spacer"></span>
         <label class="tlabel" for="sinkSel">音声出力先</label>
         <select id="sinkSel"><option value="">既定のデバイス</option></select>
@@ -354,10 +354,11 @@
             <li>「パッケージ化されていない拡張機能を読み込む」を押し、展開したフォルダを選ぶ。</li>
             <li>このページを再読み込みし、「連携を確認」で接続できたら、「拡張でこのタブの音を切り替える」を押す。出力先は上の「音声出力先」で選んだデバイスが使われ、再生中に変えると拡張側へも適用される。</li>
             <li>止めるときは「拡張の音声を停止」。元のタブのミュートも解除される。</li>
-            <li>以前の版（v1.2.0 以前）を入れている場合は、上のZIPを取り直し、chrome://extensions で古い拡張機能を一度削除してから新しいフォルダを読み込み直してください（ファイルの差し替えだけでは更新されません）。v1.3.0 では、開始時に「Cannot capture a tab with an active stream.」と出て開始できず、ページを再読み込みしても直らない不具合を直しています（前回のキャプチャが拡張側に残ったまま開始し直すと失敗していたため、開始前に前回のキャプチャを解放してから取り直すようにしました）。</li>
+            <li>以前の版（v1.3.0 以前）を入れている場合は、上のZIPを取り直し、chrome://extensions で古い拡張機能を一度削除してから新しいフォルダを読み込み直してください（ファイルの差し替えだけでは更新されません）。v1.4.0 では、ポップアップでデバイス許可が「Permission dismissed」になって取れない不具合を直しています（理由と新しい取り方は最後の項目）。v1.3.0 では、開始時に「Cannot capture a tab with an active stream.」と出て開始できず、ページを再読み込みしても直らない不具合を直しています（前回のキャプチャが拡張側に残ったまま開始し直すと失敗していたため、開始前に前回のキャプチャを解放してから取り直すようにしました）。</li>
             <li>それでも同じエラーが出る場合は、ツールバーの拡張機能アイコンをクリックしてポップアップを開き、そこの「開始」を押してください（ポップアップを開く操作が、そのタブでの拡張機能の呼び出しになります）。chrome:// などのブラウザ内蔵ページはキャプチャできないので、ビューアのタブで実行してください。</li>
             <li>AudioPick など、タブの音声を扱う別の拡張機能が同じタブをキャプチャしていると開始できません（タブキャプチャは1タブに1つまで）。「Cannot capture a tab with an active stream.」が解消しない場合は、その拡張機能側のキャプチャを止めるか、chrome://extensions で一時的に無効化してから開始し直してください。</li>
-            <li>拡張側で出力デバイスが1件しか取得できない場合は、拡張機能アイコンのポップアップにある「デバイス許可を取って取り直す」を押して許可を与えてから取り直してください。マイク許可がない環境では、ブラウザの仕様で既定のデバイス1件しか列挙されません（許可を取ると全デバイスが見えるようになります）。</li>
+            <li>拡張側で出力デバイスが1件しか取得できない場合は、拡張機能アイコンのポップアップにある <b>「デバイス許可ページを開く」</b> を押してください。専用のタブが開くので、そのタブで <b>「許可を求める」→ ブラウザのダイアログで「許可」</b> の順に進めます。許可が取れたらタブを閉じ、ポップアップを開き直すと全デバイスが表示されます。マイク許可がない環境では、ブラウザの仕様で既定のデバイス1件しか列挙されません。マイクはデバイス名の列挙にだけ使い、録音・送信はしません（許可を取る処理では一瞬だけ開いてすぐ停止します）。</li>
+            <li><b>「許可が取れませんでした: Permission dismissed」が出ていた方へ（v1.4.0 で修正）：</b>旧版はポップアップの中で直接許可を求めていましたが、許可ダイアログが出るとポップアップが閉じてしまい、要求が破棄されて許可が取れませんでした。v1.4.0 では許可を専用タブで取る方式に変えたので、上の手順で取り直してください。専用タブでもダイアログが出ない（前にブロックした）場合は、そのタブのアドレスバー左端のアイコン →「サイトの設定」→「マイク」を「許可」に変えてから取り直してください（手順は専用タブの中にも書いてあります）。</li>
           </ol>
           <div class="ext-files">
             <button type="button" id="extZip">拡張機能一式（ZIP）をダウンロード</button>
@@ -1334,13 +1335,28 @@
            状態を完全リセットする（未消費の streamId がキャプチャ予約
            として残ると、以降の開始がすべて同じエラーで失敗するため。
            AudioPick を無効化しても再現したことから、自拡張側の残留が
-           本命と判断した）。 */
+           本命と判断した）。
+           拡張 v1.4.0 での修正：ポップアップの「デバイス許可を取って
+           取り直す」を押すと "Permission dismissed" になり許可が取れない
+           不具合。Chrome の拡張ポップアップは、許可ダイアログが出ると
+           フォーカスを失って閉じてしまい、進行中の getUserMedia が
+           「dismissed（破棄）」として拒否される（ポップアップ内で直接
+           許可を求める方式自体が成立しない）。そこで許可取得は
+           ポップアップから切り離し、専用のタブページ permission.html で
+           行うようにした：ポップアップのボタンはそのページを新しいタブで
+           開くだけにし、ページ側のボタン操作で getUserMedia を呼ぶ。
+           タブは閉じないため許可ダイアログに応答でき、許可は拡張全体
+           （offscreen 含む）で効くので全デバイスが列挙できるようになる。
+           すでにブロック済みでダイアログ自体が出ない場合の復旧手順
+           （アドレスバーのアイコンからサイト設定でマイクを許可）も
+           permission.html に明示した。マイクはデバイス名の列挙にだけ
+           使い、取得したトラックは即停止する（録音・送信はしない）。 */
         var EXT_FILES = {};
         EXT_FILES["manifest.json"] = [
           '{',
           '  "manifest_version": 3,',
           '  "name": "まどっち音声ブリッジ",',
-          '  "version": "1.3.0",',
+          '  "version": "1.4.0",',
           '  "description": "まどっち風マルチビューアのタブ音声を、選んだ出力デバイスで再生し直す拡張機能",',
           '  "permissions": ["tabCapture", "offscreen", "tabs", "activeTab"],',
           '  "host_permissions": ["*://*/*"],',
@@ -1364,9 +1380,9 @@
           '   橋渡しはトップフレームだけで行う：iframe（Twitch埋め込み等）側でも',
           '   中継すると開始リクエストが二重に飛び、キャプチャが競合するため。 */',
           'if (window.top === window) {',
-          'document.documentElement.setAttribute("data-madocchi-ext", "1.3.0");',
+          'document.documentElement.setAttribute("data-madocchi-ext", "1.4.0");',
           'function announce() {',
-          '  window.postMessage({ source: "madocchi-ext", type: "MADOCCHI_EXT_READY", version: "1.3.0" }, "*");',
+          '  window.postMessage({ source: "madocchi-ext", type: "MADOCCHI_EXT_READY", version: "1.4.0" }, "*");',
           '}',
           'announce();',
           'window.addEventListener("DOMContentLoaded", announce);',
@@ -1506,7 +1522,7 @@
           '    try {',
           '      if (msg.target === "offscreen") { return; }',
           '      if (msg.type === "MADOCCHI_PING") {',
-          '        sendResponse({ ok: true, version: "1.3.0", capturing: captureTabId != null, deviceId: currentDeviceId, status: lastStatus });',
+          '        sendResponse({ ok: true, version: "1.4.0", capturing: captureTabId != null, deviceId: currentDeviceId, status: lastStatus });',
           '      } else if (msg.type === "MADOCCHI_START") {',
           '        var tabId = await resolveTabId(sender);',
           '        if (tabId == null) { sendResponse({ ok: false, error: "対象タブが見つかりません" }); return; }',
@@ -1530,6 +1546,10 @@
           '        var t = await stopCapture();',
           '        sendResponse({ ok: true });',
           '        if (t != null) notifyTab(t, { capturing: false, deviceId: currentDeviceId });',
+          '      } else if (msg.type === "MADOCCHI_OPEN_PERMISSION") {',
+          '        /* 許可はポップアップ内では取れない（ダイアログでポップアップが閉じて Permission dismissed になる）ため、専用タブを開く */',
+          '        await chrome.tabs.create({ url: chrome.runtime.getURL("permission.html") });',
+          '        sendResponse({ ok: true });',
           '      } else if (msg.type === "MADOCCHI_LIST_DEVICES") {',
           '        await ensureOffscreen();',
           '        var rd = await chrome.runtime.sendMessage({ type: "OFFSCREEN_LIST_DEVICES", target: "offscreen" });',
@@ -1654,7 +1674,8 @@
           '<b>まどっち音声ブリッジ</b>',
           '<div>このタブの音声の出力先</div>',
           '<select id="dev"><option value="">既定のデバイス</option></select>',
-          '<button type="button" id="labels">デバイス許可を取って取り直す</button>',
+          '<button type="button" id="labels">デバイス許可ページを開く</button>',
+          '<div style="color:#555;font-size:12px;line-height:1.5;margin:2px 0 4px;">デバイスが1件しか出ないときはここから。許可はポップアップ内では取れない（ダイアログでポップアップが閉じて Permission dismissed になる）ため、専用タブで取ります。</div>',
           '<div>',
           '  <button type="button" id="start">開始</button>',
           '  <button type="button" id="apply">出力先を適用</button>',
@@ -1697,7 +1718,7 @@
           '    sel.appendChild(o);',
           '  });',
           '  sel.value = cur;',
-          '  if (sel.options.length <= 1) statusEl.textContent = "出力デバイスが既定の1件しか取得できていません。上の「デバイス許可を取って取り直す」を押して許可を与えてください（許可がないと全デバイスは列挙されません）。";',
+          '  if (sel.options.length <= 1) statusEl.textContent = "出力デバイスが既定の1件しか取得できていません。上の「デバイス許可ページを開く」から開いたタブでマイクを許可してください（許可がないと全デバイスは列挙されません）。許可後にこのポップアップを開き直すと全件表示されます。";',
           '}',
           'function send(type) {',
           '  var opt = sel.options[sel.selectedIndex];',
@@ -1707,18 +1728,23 @@
           '  });',
           '}',
           'document.getElementById("labels").addEventListener("click", async function () {',
-          '  /* マイク許可がないと enumerateDevices は既定の1件しか返さない',
-          '     （AudioPick など許可取得済みの拡張は全件見える）。ポップアップは',
-          '     拡張のページなので、ここで許可を取れば拡張全体（offscreen 含む）で',
+          '  /* v1.3.0 まではポップアップ内で直接 getUserMedia を呼んでいたが、',
+          '     許可ダイアログが出るとポップアップがフォーカスを失って閉じ、',
+          '     要求が "Permission dismissed" で拒否されて許可が取れなかった。',
+          '     ポップアップ内では許可を求めず、専用タブ permission.html を開く',
+          '     だけにする。タブ側で許可を取れば拡張全体（offscreen 含む）で',
           '     全デバイスが列挙できるようになる */',
+          '  statusEl.textContent = "許可ページを新しいタブで開きます。そのタブで「許可を求める」を押してマイクを許可してください。";',
           '  try {',
-          '    var s = await navigator.mediaDevices.getUserMedia({ audio: true });',
-          '    s.getTracks().forEach(function (t) { t.stop(); });',
-          '    statusEl.textContent = "許可を取りました。デバイスを取り直します。";',
+          '    await chrome.tabs.create({ url: chrome.runtime.getURL("permission.html") });',
           '  } catch (e) {',
-          '    statusEl.textContent = "許可が取れませんでした: " + ((e && e.message) || e) + "（許可がないとデバイスは既定の1件しか取得できません）";',
+          '    try {',
+          '      var r = await chrome.runtime.sendMessage({ type: "MADOCCHI_OPEN_PERMISSION", target: "background" });',
+          '      if (!r || !r.ok) throw e;',
+          '    } catch (e2) {',
+          '      statusEl.textContent = "許可ページを開けませんでした: " + ((e2 && e2.message) || e2) + "。拡張機能を v1.4.0 に入れ直してからもう一度試してください。";',
+          '    }',
           '  }',
-          '  loadDevices();',
           '});',
           'document.getElementById("start").addEventListener("click", function () { send("MADOCCHI_START"); });',
           'document.getElementById("apply").addEventListener("click", function () { send("MADOCCHI_SET_DEVICE"); });',
@@ -1727,6 +1753,119 @@
           'chrome.runtime.sendMessage({ type: "MADOCCHI_PING", target: "background" }, function (r) {',
           '  if (r && r.ok) statusEl.textContent = r.capturing ? "再生中（出力先は拡張機能が担当）" : "待機中";',
           '});'
+        ].join("\n");
+        EXT_FILES["permission.html"] = [
+          '<!doctype html>',
+          '<html lang="ja">',
+          '<head>',
+          '<meta charset="utf-8">',
+          '<title>まどっち音声ブリッジ — デバイス許可</title>',
+          '<style>',
+          '  body { font-family: sans-serif; max-width: 640px; margin: 32px auto; padding: 0 16px 40px; font-size: 14px; line-height: 1.7; color: #18181b; }',
+          '  h1 { font-size: 18px; margin: 0 0 8px; }',
+          '  button { min-height: 40px; padding: 0 16px; margin: 4px 4px 4px 0; font-size: 14px; cursor: pointer; }',
+          '  #req { background: #9146ff; color: #fff; border: 1px solid #9146ff; border-radius: 6px; font-weight: 700; }',
+          '  #st { font-weight: 700; min-height: 1.6em; margin: 12px 0; }',
+          '  #st.ok { color: #2f9e44; } #st.bad { color: #c92a2a; }',
+          '  .box { background: #f2f2f4; border: 1px solid #d7d7de; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }',
+          '  ul { margin: 6px 0; padding-left: 20px; }',
+          '  #devs { margin: 6px 0; padding-left: 20px; }',
+          '</style>',
+          '</head>',
+          '<body>',
+          '<h1>まどっち音声ブリッジ — デバイス許可</h1>',
+          '<p>出力デバイスの<strong>名前をすべて表示</strong>するために、マイクの許可が必要です。これはブラウザの仕様で、許可がないとデバイスは既定の1件しか列挙されません。</p>',
+          '<div class="box">',
+          '  <b>マイクの音を録ることはありません。</b>',
+          '  <ul>',
+          '    <li>許可は「デバイス名を列挙できるようにする」ためだけに使います</li>',
+          '    <li>許可を取る処理ではマイクを一瞬だけ開き、すぐに停止します（録音・保存・外部送信はしません）</li>',
+          '    <li>許可はこの拡張機能に対してだけ効きます</li>',
+          '  </ul>',
+          '</div>',
+          '<button type="button" id="req">許可を求める</button>',
+          '<button type="button" id="reload">デバイスを取り直す</button>',
+          '<button type="button" id="close">このタブを閉じる</button>',
+          '<p id="st">まだ許可を取っていません。下の「取り直す」で現在の見え方も確認できます。</p>',
+          '<div>いま見えている出力デバイス:</div>',
+          '<ul id="devs"><li>（未取得）</li></ul>',
+          '<div class="box" id="help" hidden>',
+          '  <b>許可ダイアログが出ない／前に閉じてしまった場合</b>',
+          '  <ul>',
+          '    <li>このタブのアドレスバー左端のアイコン（鍵／調整アイコン）をクリック → 「サイトの設定」→「マイク」を「許可」に変える</li>',
+          '    <li>変えたらこのタブに戻って「デバイスを取り直す」を押す（それでも出なければタブを再読み込みして「許可を求める」をもう一度）</li>',
+          '    <li>「ブロック中」と表示される場合は、上記で許可に変えない限りダイアログは二度と出ません</li>',
+          '  </ul>',
+          '</div>',
+          '<p>許可が取れたら、このタブを閉じてビューアに戻り、拡張機能のポップアップを開き直してください。デバイスが全件表示されます。</p>',
+          '<script src="permission.js"><\/script>',
+          '</body>',
+          '</html>'
+        ].join("\n");
+        EXT_FILES["permission.js"] = [
+          '"use strict";',
+          'var statusEl = document.getElementById("st");',
+          'var devsEl = document.getElementById("devs");',
+          'var helpEl = document.getElementById("help");',
+          'function setStatus(text, kind) { statusEl.textContent = text; statusEl.className = kind || ""; }',
+          'async function listDevices() {',
+          '  try {',
+          '    var devs = await navigator.mediaDevices.enumerateDevices();',
+          '    var outs = devs.filter(function (d) { return d.kind === "audiooutput" && d.deviceId !== "default"; });',
+          '    devsEl.innerHTML = "";',
+          '    if (!outs.length) {',
+          '      var li0 = document.createElement("li"); li0.textContent = "既定のデバイスのみ（名前は取得できていません）"; devsEl.appendChild(li0);',
+          '      return 0;',
+          '    }',
+          '    outs.forEach(function (d, i) {',
+          '      var li = document.createElement("li");',
+          '      li.textContent = d.label || ("（名前なし）出力デバイス " + (i + 1));',
+          '      devsEl.appendChild(li);',
+          '    });',
+          '    var named = outs.filter(function (d) { return !!d.label; }).length;',
+          '    return named;',
+          '  } catch (e) {',
+          '    setStatus("デバイス取得に失敗: " + ((e && e.message) || e), "bad");',
+          '    return 0;',
+          '  }',
+          '}',
+          'document.getElementById("req").addEventListener("click", async function () {',
+          '  /* このページはタブとして開かれるため、ポップアップと違い',
+          '     許可ダイアログが出ても閉じない。ここで取った許可は拡張全体で効く */',
+          '  setStatus("許可を求めています…ブラウザのダイアログで「許可」を押してください。", "");',
+          '  try {',
+          '    var s = await navigator.mediaDevices.getUserMedia({ audio: true });',
+          '    s.getTracks().forEach(function (t) { t.stop(); });',
+          '    helpEl.hidden = true;',
+          '    var named = await listDevices();',
+          '    if (named > 0) setStatus("許可が取れました。出力デバイス " + named + " 件の名前が取得できています。このタブを閉じて、ビューアとポップアップに戻ってください。", "ok");',
+          '    else setStatus("許可処理は終わりましたが、デバイス名がまだ取得できていません。「デバイスを取り直す」を押してください。", "bad");',
+          '  } catch (e) {',
+          '    var msg = String((e && e.message) || e);',
+          '    helpEl.hidden = false;',
+          '    if (e && e.name === "NotAllowedError") {',
+          '      setStatus("許可が取れませんでした: " + msg + "。ダイアログで閉じた／ブロックした場合は再表示されないため、下の手順でアドレスバーから手動で許可に変えてください。", "bad");',
+          '    } else {',
+          '      setStatus("許可が取れませんでした: " + msg + "。下の手順も確認してください。", "bad");',
+          '    }',
+          '  }',
+          '});',
+          'document.getElementById("reload").addEventListener("click", async function () {',
+          '  var named = await listDevices();',
+          '  if (named > 0) { setStatus("出力デバイス " + named + " 件の名前が取得できています。許可は取れている状態です。", "ok"); helpEl.hidden = true; }',
+          '  else { setStatus("まだデバイス名が取得できていません（既定の1件のみ）。「許可を求める」を押してください。", ""); }',
+          '});',
+          'document.getElementById("close").addEventListener("click", function () { window.close(); });',
+          '(async function () {',
+          '  var named = await listDevices();',
+          '  if (named > 0) setStatus("すでに許可が取れています。出力デバイス " + named + " 件が見えています。このタブは閉じて構いません。", "ok");',
+          '  try {',
+          '    if (navigator.permissions && navigator.permissions.query) {',
+          '      var p = await navigator.permissions.query({ name: "microphone" });',
+          '      if (p.state === "denied") { helpEl.hidden = false; setStatus("マイクがブロック中です。ダイアログは出ないため、下の手順でアドレスバーから許可に変えてください。", "bad"); }',
+          '    }',
+          '  } catch (e) {}',
+          '})();'
         ].join("\n");
         EXT_FILES["README.md"] = [
           '# まどっち音声ブリッジ',
@@ -1757,9 +1896,10 @@
           '## うまくいかないとき',
           '',
           '- 「Extension has not been invoked for the current page」と出たら、このフォルダが v1.1.0 以降か確認し、chrome://extensions で拡張機能を削除して読み込み直す。それでも出る場合は、ツールバーの拡張機能アイコンをクリックしてポップアップを開き、そこの「開始」を押す（ポップアップを開く操作が、そのタブでの拡張機能の呼び出しになる）',
-          '- 「失敗: unknown type」と出て音が消えたら、このフォルダが v1.3.0 か確認し、chrome://extensions で拡張機能を削除して読み込み直す（v1.1.0 までは、background と offscreen が互い宛ての合図に "unknown type" で応答して競合する不具合があった）',
-          '- ポップアップやビューアで拡張側のデバイスが取れない・1件しか出ない場合は、ポップアップの「デバイス許可を取って取り直す」を押してマイク許可を与えてから取り直す（許可がないと enumerateDevices は既定の1件しか返さない。AudioPick など許可取得済みの拡張は全件見える。デバイス一覧は background 経由で offscreen から取得し、出力先はラベルと順番で対応付ける）',
-          '- 「Cannot capture a tab with an active stream.」と出たら、このフォルダが v1.3.0 か確認し、入れ直す（v1.2.0 までは前回のキャプチャや未消費の streamId が拡張側に残ったまま開始し直すとこのエラーで失敗し、ページを再読み込みしても直らなかった。v1.3.0 では開始前に前回のキャプチャを解放してから取り直し、失敗時は状態を完全リセットする）。それでも出る場合は、拡張機能を削除して読み込み直す（過去の失敗で残ったキャプチャ予約が消える）。画面共有や AudioPick など他のキャプチャ系拡張機能が同じタブを使っている場合も同じエラーになる（タブキャプチャは1タブに1つまで）',
+          '- 「失敗: unknown type」と出て音が消えたら、このフォルダが v1.4.0 か確認し、chrome://extensions で拡張機能を削除して読み込み直す（v1.1.0 までは、background と offscreen が互い宛ての合図に "unknown type" で応答して競合する不具合があった）',
+          '- ポップアップやビューアで拡張側のデバイスが取れない・1件しか出ない場合は、ポップアップの「デバイス許可ページを開く」を押して開いた専用タブ（permission.html）でマイク許可を与えてから、ポップアップを開き直す（許可がないと enumerateDevices は既定の1件しか返さない。AudioPick など許可取得済みの拡張は全件見える。デバイス一覧は background 経由で offscreen から取得し、出力先はラベルと順番で対応付ける）',
+          '- 「許可が取れませんでした: Permission dismissed」と出たら、このフォルダが v1.4.0 か確認し、入れ直す（v1.3.0 まではポップアップ内で直接 getUserMedia を呼んでいたが、許可ダイアログでポップアップが閉じて要求が破棄されていた。v1.4.0 では専用タブで許可を取る）。専用タブでもダイアログが出ない場合は、そのタブのアドレスバーのアイコンからサイト設定でマイクを許可に変える（手順は専用タブ内に記載）',
+          '- 「Cannot capture a tab with an active stream.」と出たら、このフォルダが v1.4.0 か確認し、入れ直す（v1.2.0 までは前回のキャプチャや未消費の streamId が拡張側に残ったまま開始し直すとこのエラーで失敗し、ページを再読み込みしても直らなかった。v1.3.0 では開始前に前回のキャプチャを解放してから取り直し、失敗時は状態を完全リセットする）。それでも出る場合は、拡張機能を削除して読み込み直す（過去の失敗で残ったキャプチャ予約が消える）。画面共有や AudioPick など他のキャプチャ系拡張機能が同じタブを使っている場合も同じエラーになる（タブキャプチャは1タブに1つまで）',
           '- chrome:// などのブラウザ内蔵ページはキャプチャできない。ビューアを開いているタブで実行すること',
           '- 拡張機能のファイルを差し替えたら、chrome://extensions で再読み込み（または削除して読み込み直し）をすること。差し替えだけでは古い版が動き続ける',
           '',
